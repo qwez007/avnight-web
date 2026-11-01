@@ -939,19 +939,20 @@ async function onDdPlay() {
     let isPreview = false;
     if (!m3u8 && srcs["intro"]) { m3u8 = srcs["intro"]; isPreview = true; }
     if (!m3u8) {
-      $D("dd-pstat").textContent = "该视频为奶币/VIP 内容，完整版需登录后在 App/网页购买解锁，暂无法播放";
+      $D("dd-pstat").textContent = "未获取到可播放地址，请检查内容权限或稍后重试。";
       $D("dd-playbtn").style.display = "flex"; return;
     }
-    if (isPreview) $D("dd-pstat").textContent = "正在加载预览… 此视频完整版为奶币/VIP 内容，需购买解锁";
-    $D("dd-pstat").textContent = "播放地址已获取, 正在加载…";
+    $D("dd-pstat").textContent = isPreview
+      ? "正在加载预览… 内容源当前仅返回预览版本"
+      : "播放地址已获取, 正在加载…";
     // 经 Worker 取 m3u8 并重写分片/密钥 URL 为 Worker 代理(跨域 CORS)
     const m3u8Text = await (await toFetch(playProxyUrl(m3u8))).text();
     const rewritten = m3u8Text.replace(/(https?:\/\/[^\s"'<>]+)/g, (m) => playProxyUrl(m));
     const blobUrl = URL.createObjectURL(new Blob([rewritten], { type: "application/vnd.apple.mpegurl" }));
+    const PREV_TXT = "预览播放中 · 内容源当前仅返回预览版本";
     if (window.Hls && Hls.isSupported()) {
       const hls = new Hls({ maxBufferLength: 60 }); DD.hls = hls;
       hls.loadSource(blobUrl); hls.attachMedia(video);
-      const PREV_TXT = "预览播放中 · 完整版为奶币/VIP 内容，需购买解锁";
       hls.on(Hls.Events.MANIFEST_PARSED, () => { $D("dd-pstat").textContent = isPreview ? PREV_TXT : ""; DD.loadedVcode = vcode; video.play().catch(() => $D("dd-pstat").textContent = "请点击播放器播放"); });
       hls.on(Hls.Events.ERROR, (e, data) => { if (data && data.fatal) $D("dd-pstat").textContent = "播放出错: " + (data.type || ""); });
     } else {
