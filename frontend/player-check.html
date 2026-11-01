@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <title>Safari 播放检测</title>
+  <style>
+    :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #10151d; color: #edf2fa; }
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: max(20px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left)); }
+    main { max-width: 880px; margin: auto; }
+    h1 { margin: 0 0 8px; font-size: clamp(24px, 5vw, 32px); }
+    h2 { font-size: 18px; margin: 0 0 12px; }
+    p { line-height: 1.65; margin: 8px 0; }
+    .muted, small { color: #acbad0; }
+    .panel { background: #19222e; border: 1px solid #344256; border-radius: 14px; padding: 16px; margin-top: 16px; min-width: 0; }
+    fieldset { margin: 0; padding: 0; border: 0; min-width: 0; }
+    legend { font-weight: 600; margin-bottom: 10px; }
+    .sources { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .choice { display: flex; align-items: flex-start; gap: 8px; padding: 12px; border: 1px solid #4b607a; border-radius: 10px; cursor: pointer; min-height: 64px; }
+    .choice:has(input:checked) { border-color: #70b9ff; background: #203954; }
+    .choice input { flex: none; margin-top: 5px; accent-color: #70b9ff; }
+    .choice strong, .choice small { display: block; }
+    .choice small { margin-top: 4px; line-height: 1.4; }
+    video { display: block; width: 100%; aspect-ratio: 16/9; max-height: 64dvh; background: #000; border-radius: 10px; margin-top: 16px; object-fit: contain; }
+    button { min-height: 46px; padding: 10px 14px; border-radius: 9px; border: 1px solid #4b607a; background: #26384b; color: #edf2fa; font: inherit; font-size: 16px; cursor: pointer; }
+    button:focus-visible, a:focus-visible { outline: 3px solid #70b9ff; outline-offset: 3px; }
+    #play { background: #b6dcff; border-color: #b6dcff; color: #112234; font-weight: 650; }
+    .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    #status { border-left: 3px solid #70b9ff; padding-left: 12px; overflow-wrap: anywhere; }
+    #status[data-state="error"] { border-color: #ff9b9b; }
+    #status[data-state="playing"] { border-color: #79ddba; }
+    dl { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(0, 2fr); gap: 10px; margin: 0; font-size: 14px; }
+    dt { color: #acbad0; } dd { margin: 0; overflow-wrap: anywhere; }
+    details { margin-top: 12px; } summary { cursor: pointer; min-height: 44px; padding: 10px 0; }
+    pre, textarea { white-space: pre-wrap; overflow-wrap: anywhere; width: 100%; max-width: 100%; font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; color: #dceaff; background: #0d131c; border: 1px solid #344256; border-radius: 8px; padding: 12px; }
+    #events { max-height: 240px; overflow: auto; margin: 0; }
+    textarea { height: 190px; resize: vertical; font-size: 16px; }
+    ul { padding-left: 20px; line-height: 1.7; }
+    a { color: #92caff; } .report-note { min-height: 24px; }
+    @media (max-width: 420px) { .sources { grid-template-columns: 1fr; } .panel { padding: 12px; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Safari 播放检测</h1>
+  <p class="muted">用普通公开样片检查浏览器播放能力。点击后才会加载视频，检测结果仅保留在当前页面。</p>
+  <section class="panel" aria-label="播放测试">
+    <fieldset>
+      <legend>1. 选择样片</legend>
+      <div class="sources">
+        <label class="choice"><input type="radio" name="source" value="mp4" checked><span><strong>MP4 · 花朵</strong><small>MDN 的 CC0 普通短片，先测这一项</small></span></label>
+        <label class="choice"><input type="radio" name="source" value="hls"><span><strong>HLS · Apple 示例</strong><small>测试 Safari 原生 HLS，不加载播放器插件</small></span></label>
+      </div>
+    </fieldset>
+    <video id="video" controls playsinline preload="none" aria-label="普通测试视频"></video>
+    <div class="actions">
+      <button id="play" type="button">2. 点击播放</button>
+      <button id="pause" type="button">暂停</button>
+      <button id="reset" type="button">重新检测</button>
+    </div>
+    <p id="status" role="status" aria-live="polite" data-state="idle">等待点击播放。默认不静音，以检查真实的用户点击播放行为。</p>
+    <p id="support" class="muted"></p>
+    <p id="progress" class="muted">尚未读取媒体元数据。</p>
+  </section>
+  <section class="panel">
+    <h2>环境与报告</h2>
+    <dl id="environment"></dl>
+    <div class="actions"><button id="copy" type="button">复制检测报告</button><button id="download" type="button">下载报告 JSON</button></div>
+    <p id="report-note" class="muted report-note" role="status"></p>
+    <label for="report" class="muted">复制失败时，可在下方长按选择并复制：</label>
+    <textarea id="report" readonly spellcheck="false" aria-label="检测报告文本"></textarea>
+    <details><summary>查看媒体事件日志</summary><pre id="events"></pre></details>
+  </section>
+  <section class="panel">
+    <h2>如何判断</h2>
+    <ul>
+      <li>MP4 和 HLS 都播放成功：当前浏览器能播放这些样片，但不代表所有来源、编码和内容权限都正常。</li>
+      <li>MP4 成功，HLS 失败：保留 HLS 报告，再区分原生格式支持、网络与资源响应；不能仅凭一个错误确定原因。</li>
+      <li><code>NotAllowedError</code>：浏览器拒绝了这次播放操作，属于播放权限问题。</li>
+      <li><code>NotSupportedError</code> 或媒体错误码 4：媒体源无法使用，可能涉及格式、编码或响应内容，不等同于 VIP 限制。</li>
+      <li>一直等待：检查事件日志。等待超时只表示尚未播放，并不证明视频一定损坏。</li>
+    </ul>
+    <p class="muted">运行顺序：先测 MP4，再选择 HLS 并点击播放，最后复制报告。两次结果会一起保留。</p>
+    <p class="muted">公开样片来源：<a href="https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4" target="_blank" rel="noopener noreferrer">MDN CC0 视频</a> · <a href="https://developer.apple.com/streaming/examples/" target="_blank" rel="noopener noreferrer">Apple HLS 示例</a></p>
+  </section>
+</main>
+<script>
+(() => {
+  'use strict';
+  const sources = {
+    mp4: { label: 'MDN CC0 flower.mp4', type: 'video/mp4', url: 'https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4' },
+    hls: { label: 'Apple public HLS sample', type: 'application/vnd.apple.mpegurl', url: 'https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_ts/master.m3u8' }
+  };
+  const $ = id => document.getElementById(id);
+  const video = $('video');
+  const rows = [];
+  const runs = [];
+  let active = null;
+  let sourceKey = 'mp4';
+  let watchdog = null;
+  let sequence = 0;
+  let lastProgress = 0;
+  let progressSample = null;
+  const finite = value => Number.isFinite(value) ? Math.round(value * 100) / 100 : null;
+
+  function mediaError() {
+    if (!video.error) return null;
+    return { code: video.error.code, message: String(video.error.message || '').slice(0, 240) };
+  }
+  function snapshot() {
+    return { currentTime: finite(video.currentTime), duration: finite(video.duration), paused: video.paused,
+      muted: video.muted, readyState: video.readyState, networkState: video.networkState,
+      videoWidth: video.videoWidth, videoHeight: video.videoHeight, mediaError: mediaError() };
+  }
+  function environment() {
+    return { protocol: location.protocol, secureContext: isSecureContext, onlineHint: navigator.onLine,
+      userAgent: navigator.userAgent, viewport: { width: innerWidth, height: innerHeight },
+      mp4Support: video.canPlayType('video/mp4') || 'not reported',
+      h264Support: video.canPlayType('video/mp4; codecs="avc1.42E01E"') || 'not reported',
+      nativeHlsSupport: video.canPlayType('application/vnd.apple.mpegurl') || video.canPlayType('application/x-mpegURL') || 'not reported',
+      inlinePlayback: video.playsInline };
+  }
+  function report() {
+    return { tool: 'safari-playback-check', version: 1, generatedAt: new Date().toISOString(),
+      environment: environment(), selectedSource: sourceKey, current: snapshot(), runs, events: rows };
+  }
+  function refreshReport() { $('report').value = JSON.stringify(report(), null, 2); }
+  function log(event, detail) {
+    rows.push({ at: new Date().toISOString(), run: active ? active.id : null, source: sourceKey, event, ...(detail || {}) });
+    if (rows.length > 100) rows.splice(0, rows.length - 100);
+    $('events').textContent = rows.map(row => JSON.stringify(row)).join('\n');
+    refreshReport();
+  }
+  function status(text, state) { $('status').textContent = text; $('status').dataset.state = state; }
+  function clearWatchdog() { clearTimeout(watchdog); watchdog = null; }
+  function armWatchdog(id) {
+    clearWatchdog();
+    watchdog = setTimeout(() => {
+      if (!active || active.id !== id || active.result !== 'pending') return;
+      status('20 秒内尚未开始播放。请保留报告，检查网络或媒体事件；这不是确定的格式错误。', 'waiting');
+      log('startup-wait-20s', snapshot());
+    }, 20000);
+  }
+  function finishPrevious() {
+    clearWatchdog();
+    progressSample = null;
+    if (active) {
+      active.lastObserved = snapshot();
+      if (active.result === 'pending') active.result = 'interrupted';
+    }
+    active = null;
+    sequence++;
+    video.pause(); video.removeAttribute('src'); video.load();
+  }
+  function supportHint() {
+    const supported = sourceKey === 'hls' ? environment().nativeHlsSupport : environment().mp4Support;
+    $('support').textContent = '浏览器报告的格式支持：' + supported + '。这不是实际播放成功的保证。';
+  }
+  function explainPlayError(error) {
+    if (error.name === 'NotAllowedError') return '播放被浏览器权限策略阻止（NotAllowedError）。请直接点播放器内的播放按钮；若仍失败，保留报告。';
+    if (error.name === 'NotSupportedError') return '浏览器未能使用这个媒体源（NotSupportedError）。请查看媒体错误码，不要把它当作会员提示。';
+    if (error.name === 'AbortError') return '播放操作被中断（AbortError），可能刚刚切换了资源或重新加载。';
+    return '播放请求失败：' + error.name + '。具体信息已记入报告。';
+  }
+  function onPlayRejection(error, id) {
+    if (!active || active.id !== id) return;
+    clearWatchdog();
+    active.result = 'play-rejected';
+    active.playError = { name: String(error.name || 'Error'), message: String(error.message || '').slice(0, 240) };
+    status(explainPlayError(active.playError), 'error');
+    log('play-promise-rejected', active.playError);
+  }
+  function play() {
+    if (active && active.source === sourceKey && !video.error && video.getAttribute('src')) {
+      const id = active.id;
+      if (!video.paused && video.readyState >= 2) { log('already-playing'); return; }
+      active.result = 'pending';
+      status('正在请求播放…', 'loading');
+      armWatchdog(id);
+      log('resume-click');
+      try { const pending = video.play(); if (pending) pending.catch(error => onPlayRejection(error, id)); }
+      catch (error) { onPlayRejection(error, id); }
+      return;
+    }
+    finishPrevious();
+    sourceKey = document.querySelector('input[name="source"]:checked').value;
+    const source = sources[sourceKey];
+    active = { id: ++sequence, source: sourceKey, label: source.label, startedAt: new Date().toISOString(), result: 'pending' };
+    runs.push(active);
+    if (runs.length > 20) runs.shift();
+    const id = active.id;
+    status('正在加载普通测试视频…', 'loading');
+    video.muted = false;
+    video.src = source.url;
+    video.load();
+    log('play-click');
+    armWatchdog(id);
+    // Call play synchronously from the real click. No fetch or await before it.
+    try { const pending = video.play(); if (pending) pending.catch(error => onPlayRejection(error, id)); }
+    catch (error) { onPlayRejection(error, id); }
+  }
+
+  $('play').addEventListener('click', play);
+  $('pause').addEventListener('click', () => {
+    clearWatchdog(); progressSample = null; video.pause();
+    if (active && active.result === 'pending') active.result = 'paused';
+    log('pause-click');
+  });
+  $('reset').addEventListener('click', () => {
+    finishPrevious(); rows.length = 0; runs.length = 0;
+    $('progress').textContent = '尚未读取媒体元数据。';
+    $('report-note').textContent = '';
+    status('已清空结果。请点击播放开始新的检测。', 'idle');
+    log('reset');
+  });
+  document.querySelectorAll('input[name="source"]').forEach(input => input.addEventListener('change', () => {
+    finishPrevious(); sourceKey = input.value; supportHint();
+    $('progress').textContent = '尚未读取媒体元数据。';
+    status('已选择 ' + sources[sourceKey].label + '，请点击播放。', 'idle');
+    log('source-selected');
+  }));
+  for (const event of ['loadstart', 'loadedmetadata', 'loadeddata', 'canplay', 'playing', 'waiting', 'stalled', 'suspend', 'pause', 'ended', 'error']) {
+    video.addEventListener(event, () => {
+      if (!active) return;
+      if (video.getAttribute('src') !== sources[active.source].url) return;
+      // Old queued events can arrive after load(); classify only current state.
+      if (event === 'error' && !video.error) return;
+      if (event === 'pause' && !video.paused) return;
+      if (event === 'ended' && !video.ended) return;
+      if (event === 'playing' && (video.paused || video.readyState < 2)) return;
+      if (event === 'loadedmetadata' && video.readyState < 1) return;
+      if (event === 'loadeddata' && video.readyState < 2) return;
+      if (event === 'canplay' && video.readyState < 3) return;
+      const current = snapshot();
+      active.lastObserved = current;
+      if (event === 'playing') {
+        clearWatchdog(); active.result = 'playing'; active.playingObserved = true;
+        progressSample = { run: active.id, time: video.currentTime };
+        status('已收到 playing 事件。请确认画面在动；播放能力结论仅适用于这个样片。', 'playing');
+      } else if (event === 'error') {
+        clearWatchdog(); active.result = 'media-error';
+        progressSample = null;
+        const code = video.error ? video.error.code : 0;
+        const messages = { 1: '媒体加载被中止', 2: '媒体请求出现网络错误', 3: '媒体解码失败', 4: '媒体源或格式无法使用' };
+        status('媒体错误 ' + code + '：' + (messages[code] || '未知错误') + '。请复制报告保留详细信息。', 'error');
+      } else if (event === 'ended') {
+        clearWatchdog(); active.result = 'ended'; status('样片播放结束。', 'playing');
+        progressSample = null;
+      } else if (event === 'pause' && video.error === null && !video.ended) {
+        clearWatchdog(); progressSample = null;
+        if (active.result === 'pending') active.result = 'paused';
+        status('已暂停。可点击播放继续。', 'paused');
+      } else if (event === 'waiting' && active.playingObserved) {
+        status('正在缓冲，等待媒体数据…', 'waiting');
+      }
+      if (video.videoWidth) $('progress').textContent = '分辨率 ' + video.videoWidth + ' × ' + video.videoHeight + ' · 时长 ' + (finite(video.duration) ?? '未知') + ' 秒';
+      log('media-' + event, current);
+    });
+  }
+  video.addEventListener('timeupdate', () => {
+    if (!active) return;
+    active.lastObserved = snapshot();
+    if (active.playingObserved && !video.paused && !video.seeking) {
+      if (progressSample && progressSample.run === active.id && video.currentTime > progressSample.time + 0.1) active.timeAdvanced = true;
+      progressSample = { run: active.id, time: video.currentTime };
+    } else { progressSample = null; }
+    if (Date.now() - lastProgress > 1000) { lastProgress = Date.now(); refreshReport(); }
+  });
+  video.addEventListener('seeking', () => { progressSample = null; if (active) log('media-seeking'); });
+  video.addEventListener('seeked', () => { progressSample = null; if (active) log('media-seeked'); });
+  $('copy').addEventListener('click', async () => {
+    refreshReport();
+    try {
+      if (!navigator.clipboard || !isSecureContext) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText($('report').value);
+      $('report-note').textContent = '已复制检测报告。';
+    } catch (_) {
+      $('report').focus(); $('report').select();
+      $('report-note').textContent = '自动复制不可用；报告已选中，请使用系统菜单复制。';
+    }
+  });
+  $('download').addEventListener('click', () => {
+    refreshReport();
+    const url = URL.createObjectURL(new Blob([$('report').value], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url; link.download = 'safari-playback-report.json'; document.body.appendChild(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    $('report-note').textContent = '已请求下载报告；Safari 也可能显示文件预览。';
+  });
+  const info = environment();
+  const fields = { '页面协议': info.protocol, '安全上下文': String(info.secureContext), 'MP4 支持': info.mp4Support,
+    'H.264 支持': info.h264Support, '原生 HLS 支持': info.nativeHlsSupport, '内联播放': String(info.inlinePlayback), '浏览器': info.userAgent };
+  for (const [key, value] of Object.entries(fields)) {
+    const dt = document.createElement('dt'); dt.textContent = key;
+    const dd = document.createElement('dd'); dd.textContent = value;
+    $('environment').append(dt, dd);
+  }
+  supportHint(); log('page-ready');
+})();
+</script>
+</body>
+</html>
